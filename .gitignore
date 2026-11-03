@@ -1,0 +1,26 @@
+# Vivado generated and local state
+.Xil/
+**/.Xil/
+*.jou
+*.log
+*.str
+*.pb
+*.wdb
+*.wcfg
+*.dcp
+*.bit
+*.bin
+*.ltx
+*.cache/
+*.gen/
+*.hw/
+*.ip_user_files/
+*.runs/
+*.sim/
+
+# OS/editor files
+.DS_Store
+Thumbs.db
+*~
+*.swp
+
