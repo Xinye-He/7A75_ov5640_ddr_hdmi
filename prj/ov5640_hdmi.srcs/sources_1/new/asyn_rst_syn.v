@@ -28,8 +28,8 @@ module asyn_rst_syn(
     );
     
 //reg define
-reg reset_1;
-reg reset_2;
+(* ASYNC_REG = "TRUE", SHREG_EXTRACT = "NO" *) reg reset_1;
+(* ASYNC_REG = "TRUE", SHREG_EXTRACT = "NO" *) reg reset_2;
     
 //*****************************************************
 //**                    main code

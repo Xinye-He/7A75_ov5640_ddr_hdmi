@@ -24,7 +24,6 @@
 module ddr3_top(
     input              clk_200m            ,   //ddr3参考时钟
     input              sys_rst_n           ,   //复位,低有效
-    input              sys_init_done       ,   //系统初始化完成               
     //DDR3接口信号                           
     input   [27:0]     app_addr_rd_min     ,   //读ddr3的起始地址
     input   [27:0]     app_addr_rd_max     ,   //读ddr3的结束地址
@@ -59,7 +58,8 @@ module ddr3_top(
     input              rd_load             ,    //输出源更新信号
     input              wr_load             ,    //输入源更新信号
     output  [15:0]     dataout             ,   //rfifo输出数据
-    output             init_calib_complete     //ddr3初始化完成信号
+    output             init_calib_complete ,   //ddr3初始化完成信号
+    output             capture_allow           //摄像头下一整帧采集许可
     );                
                       
  //wire define  
@@ -87,9 +87,16 @@ wire [3 :0]           state_cnt            ;   //状态计数器
 wire [23:0]           rd_addr_cnt          ;   //用户读地址计数器                     
 wire [23:0]           wr_addr_cnt          ;   //用户写地址计数器                     
 wire                  rfifo_wren           ;   //从ddr3读出数据的有效使能             
-wire [10:0]           wfifo_rcount         ;   //rfifo剩余数据计数                    
-wire [10:0]           rfifo_wcount         ;   //wfifo写进数据计数  
-wire                  init_calib_complete  ;   //ddr3初始化完成信号    
+wire [8:0]            wfifo_rcount         ;   //写FIFO中128bit字数量
+wire [8:0]            rfifo_wcount         ;   //读FIFO中128bit字数量
+wire                  wfifo_empty          ;
+wire                  rfifo_full           ;
+wire                  wfifo_rd_busy        ;
+wire                  rfifo_wr_busy        ;
+wire                  rfifo_flush          ;
+(* MARK_DEBUG = "TRUE" *) wire camera_overflow;
+(* MARK_DEBUG = "TRUE" *) wire video_underflow;
+(* MARK_DEBUG = "TRUE" *) wire read_overflow;
                                                                                                                                                                        
 //*****************************************************                               
 //**                    main code                                                     
@@ -118,12 +125,19 @@ wire                  init_calib_complete  ;   //ddr3初始化完成信号
     .wr_bust_len          (wr_bust_len)         ,   //从ddr3中写数据时的突发长度                                  
     //用户接口                                                                        
     .rfifo_wren           (rfifo_wren)          ,   //从ddr3读出数据的有效使能 
+    .rfifo_flush          (rfifo_flush)         ,
+    .capture_allow        (capture_allow)       ,
     .rd_load              (rd_load)             ,   //输出源更新信号
     .wr_load              (wr_load)             ,   //输入源更新信号
     .ddr3_read_valid      (ddr3_read_valid)     ,   //DDR3 读使能
     .ddr3_pingpang_en     (ddr3_pingpang_en)    ,   //DDR3 乒乓操作使能    
     .wfifo_rcount         (wfifo_rcount)        ,   //rfifo剩余数据计数                  
-    .rfifo_wcount         (rfifo_wcount)            //wfifo写进数据计数
+    .rfifo_wcount         (rfifo_wcount)        ,
+    .wfifo_empty          (wfifo_empty)         ,
+    .rfifo_full           (rfifo_full)          ,
+    .wfifo_rd_busy        (wfifo_rd_busy)       ,
+    .rfifo_wr_busy        (rfifo_wr_busy)       ,
+    .read_overflow        (read_overflow)
     );
     
 //MIG IP核模块
@@ -158,42 +172,50 @@ mig_7series_0 u_mig_7series_0 (
                                                      
     .app_rdy             (app_rdy)              ,      
     .app_wdf_rdy         (app_wdf_rdy)          ,          
-    .app_sr_req          ()                     ,                    
-    .app_ref_req         ()                     ,              
-    .app_zq_req          ()                     ,             
+    .app_sr_req          (1'b0)                 ,
+    .app_ref_req         (1'b0)                 ,
+    .app_zq_req          (1'b0)                 ,
     .app_sr_active       (app_sr_active)        ,        
     .app_ref_ack         (app_ref_ack)          ,         
     .app_zq_ack          (app_zq_ack)           ,             
     .ui_clk              (ui_clk)               ,                
     .ui_clk_sync_rst     (ui_clk_sync_rst)      ,                                               
-    .app_wdf_mask        (31'b0)                ,    
+    .app_wdf_mask        (16'b0)                ,
     // System Clock Ports                            
     .sys_clk_i           (clk_200m)             ,    
     // Reference Clock Ports                         
-    .clk_ref_i           (clk_200m)             ,    
-    .sys_rst             (sys_rst_n)                 
+    .clk_ref_i           (clk_200m)             ,
+    .sys_rst             (sys_rst_n)            ,
+    .device_temp         ()
     );                                               
                                                      
 ddr3_fifo_ctrl u_ddr3_fifo_ctrl (
 
-    .rst_n               (sys_rst_n &&sys_init_done )  ,  
+    .rst_n               (sys_rst_n)                  ,
     //输入源接口
     .wr_clk              (wr_clk)                      ,
     .rd_clk              (rd_clk)                      ,
-    .clk_100             (ui_clk)                      ,    //用户时钟 
+    .ui_clk              (ui_clk)                      ,    //用户时钟
     .datain_valid        (datain_valid)                ,    //数据有效使能信号
     .datain              (datain)                      ,    //有效数据 
     .rfifo_din           (app_rd_data)                 ,    //用户读数据 
     .rdata_req           (rdata_req)                   ,    //请求像素点颜色数据输入 
     .rfifo_wren          (rfifo_wren)                  ,    //ddr3读出数据的有效使能 
     .wfifo_rden          (app_wdf_wren)                ,    //ddr3 写使能         
+    .rfifo_flush         (rfifo_flush)                 ,
     //用户接口
     .wfifo_rcount        (wfifo_rcount)                ,    //rfifo剩余数据计数                 
     .rfifo_wcount        (rfifo_wcount)                ,    //wfifo写进数据计数                
     .wfifo_dout          (app_wdf_data)                ,    //用户写数据 
     .rd_load             (rd_load)                     ,    //输出源更新信号
     .wr_load             (wr_load)                     ,    //输入源更新信号
-    .pic_data            (dataout)                          //rfifo输出数据        	
+    .pic_data            (dataout)                     ,
+    .wfifo_empty         (wfifo_empty)                 ,
+    .rfifo_full          (rfifo_full)                  ,
+    .wfifo_rd_busy       (wfifo_rd_busy)               ,
+    .rfifo_wr_busy       (rfifo_wr_busy)               ,
+    .camera_overflow     (camera_overflow)             ,
+    .video_underflow     (video_underflow)
     );
 
 endmodule

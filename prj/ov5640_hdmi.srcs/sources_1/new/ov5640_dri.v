@@ -24,6 +24,7 @@
 module ov5640_dri (
     input           clk             ,  //时钟
     input           rst_n           ,  //复位信号,低电平有效
+    input           cam_domain_rst_n,  //摄像头像素时钟域复位
     //摄像头接口 
     input           cam_pclk        ,  //cmos 数据像素时钟
     input           cam_vsync       ,  //cmos 场同步信号
@@ -41,6 +42,7 @@ module ov5640_dri (
     input    [12:0] total_v_pixel   ,  //垂直总像素大小
     input           capture_start   ,  //图像采集开始信号
     output          cam_init_done   ,  //摄像头初始化完成
+    output reg      cam_init_error  ,  //SCCB配置过程中出现未应答
     
     //用户接口
     output          cmos_frame_vsync,  //帧有效信号    
@@ -62,6 +64,7 @@ wire        i2c_done       ;  //I2C寄存器配置完成信号
 wire        i2c_dri_clk    ;  //I2C操作时钟
 wire [ 7:0] i2c_data_r     ;  //I2C读出的数据
 wire        i2c_rh_wl      ;  //I2C读写控制信号
+wire        i2c_ack        ;
 
 //*****************************************************
 //**                    main code                      
@@ -69,7 +72,15 @@ wire        i2c_rh_wl      ;  //I2C读写控制信号
 
 //电源休眠模式选择 0：正常模式 1：电源休眠模式
 assign  cam_pwdn  = 1'b0;
-assign  cam_rst_n = 1'b1;
+assign  cam_rst_n = rst_n;
+
+//保存任意一次SCCB未应答，防止短脉冲在系统顶层丢失。
+always @(posedge clk or negedge rst_n) begin
+    if(!rst_n)
+        cam_init_error <= 1'b0;
+    else if(i2c_ack)
+        cam_init_error <= 1'b1;
+end
     
 //I2C配置模块
 i2c_ov5640_rgb565_cfg u_i2c_cfg(
@@ -107,6 +118,7 @@ u_i2c_dr(
     .i2c_data_w         (i2c_data[7:0]),   
     .i2c_data_r         (i2c_data_r),   
     .i2c_done           (i2c_done  ),
+    .i2c_ack            (i2c_ack   ),
     
     .scl                (cam_scl   ),   
     .sda                (cam_sda   ),   
@@ -116,7 +128,8 @@ u_i2c_dr(
 
 //CMOS图像数据采集模块
 cmos_capture_data u_cmos_capture_data(      //系统初始化完成之后再开始采集数据 
-    .rst_n              (rst_n & capture_start),
+    .rst_n              (cam_domain_rst_n),
+    .capture_enable     (capture_start),
     
     .cam_pclk           (cam_pclk),
     .cam_vsync          (cam_vsync),
@@ -129,4 +142,4 @@ cmos_capture_data u_cmos_capture_data(      //系统初始化完成之后再开�
     .cmos_frame_data    (cmos_frame_data )  //有效数据 
     );
 
-endmodule 
+endmodule

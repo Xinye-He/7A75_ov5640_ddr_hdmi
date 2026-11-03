@@ -22,6 +22,7 @@
 //****************************************************************************************//
 module cmos_capture_data(
     input                 rst_n            ,  //复位信号    
+    input                 capture_enable   ,  //只在帧边界更新的采集许可
     //摄像头接口                           
     input                 cam_pclk         ,  //cmos 数据像素时钟
     input                 cam_vsync        ,  //cmos 场同步信号
@@ -49,6 +50,7 @@ reg    [15:0]   cmos_data_t      ;            //用于8位转16位的临时寄�
 reg             byte_flag        ;            //16位RGB数据转换完成的标志信号
 reg             byte_flag_d0     ;
 reg             frame_val_flag   ;            //帧有效的标志 
+reg             capture_active   ;            //当前整帧是否采集
 
 wire            pos_vsync        ;            //采输入场同步信号的上升沿
 
@@ -60,16 +62,24 @@ wire            pos_vsync        ;            //采输入场同步信号的上�
 assign pos_vsync = (~cam_vsync_d1) & cam_vsync_d0; 
 
 //输出帧有效信号
-assign  cmos_frame_vsync = frame_val_flag  ?  cam_vsync_d1  :  1'b0; 
+assign  cmos_frame_vsync = (frame_val_flag && capture_active) ? cam_vsync_d1 : 1'b0;
 
 //输出行有效信号
-assign  cmos_frame_href  = frame_val_flag  ?  cam_href_d1   :  1'b0; 
+assign  cmos_frame_href  = (frame_val_flag && capture_active) ? cam_href_d1 : 1'b0;
 
 //输出数据使能有效信号
-assign  cmos_frame_valid = frame_val_flag  ?  byte_flag_d0  :  1'b0; 
+assign  cmos_frame_valid = (frame_val_flag && capture_active) ? byte_flag_d0 : 1'b0;
 
 //输出数据
-assign  cmos_frame_data  = frame_val_flag  ?  cmos_data_t   :  1'b0; 
+assign  cmos_frame_data  = (frame_val_flag && capture_active) ? cmos_data_t : 16'b0;
+
+//采集许可只在场同步边界生效，禁止在一帧中途启停而造成半帧写入。
+always @(posedge cam_pclk or negedge rst_n) begin
+    if(!rst_n)
+        capture_active <= 1'b0;
+    else if(pos_vsync)
+        capture_active <= capture_enable;
+end
        
 always @(posedge cam_pclk or negedge rst_n) begin
     if(!rst_n) begin

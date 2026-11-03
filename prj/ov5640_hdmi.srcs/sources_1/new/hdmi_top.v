@@ -1,153 +1,86 @@
-//****************************************Copyright (c)***********************************//
-//?0?9?1?7?0?6?1?7?1?7?1?7?1?7?1?9?1?7?0?1?0?9?0?6?1?7?1?7www.yuanzige.com
-//?1?7?1?7?1?7?1?7?0?1?1?7?0?7?1?7www.openedv.com
-//?1?7?0?3?1?7?1?7?1?7?1?7?0?1?1?7http://openedv.taobao.com
-//?1?7?1?7?0?0?0?1?1?7?0?1?1?7?1?7?1?7?0?9?0?6?0?1?1?7?0?2?0?0?1?7"?1?7?1?7?1?7?1?7?0?9?1?7?1?7"?1?7?1?7?1?7?1?7?0?1?1?7?0?0ZYNQ & FPGA & STM32 & LINUX?1?7?1?7?1?7?0?3?1?7
-//?1?7?1?7?0?7?1?7?1?7?1?7???1?7?1?7?1?7?1?7?1?7?1?2?1?7?1?7?1?7
-//Copyright(C) ?1?7?1?7?1?7?1?7?0?9?1?7?1?7 2018-2028
-//All rights reserved
-//----------------------------------------------------------------------------------------
-// File name:           hdmi_top
-// Last modified Date:  2020/05/04 9:19:08
-// Last Version:        V1.0
-// Descriptions:        HDMI?1?7?1?7?0?5?1?7?1?7?1?7?1?7?0?0?1?7?1?7
-//                      
-//----------------------------------------------------------------------------------------
-// Created by:          ?1?7?1?7?1?7?1?7?0?9?1?7?1?7
-// Created date:        2019/05/04 9:19:08
-// Version:             V1.0
-// Descriptions:        The original version
-//
-//----------------------------------------------------------------------------------------
-//****************************************************************************************//
-
-module  hdmi_top(
+module hdmi_top(
     input           pixel_clk,
-    input           pixel_clk_5x,    
+    input           pixel_clk_5x,
     input           sys_rst_n,
-   //hdmi?1?7?0?3?1?7
-    input           hpdin,    
-    output          tmds_clk_p,     // TMDS ?0?2?1?7?1?7?0?0?1?7?1?7
+    input           hpdin,
+    output          tmds_clk_p,
     output          tmds_clk_n,
-    output [2:0]    tmds_data_p,    // TMDS ?1?7?1?7?1?7?1?7?0?0?1?7?1?7
+    output [2:0]    tmds_data_p,
     output [2:0]    tmds_data_n,
-    output          tmds_oen ,      // TMDS ?1?7?1?7?1?7?0?0?1?7?1?7
+    output          tmds_oen,
     output          hpdout,
-	
-	// output          video_hs,
-	// output          video_vs1,
-	// output          video_de,
-	// output  [23:0]  video_rgb,
-	
-   //?1?7?0?4?1?7?1?7?0?3?1?7 
-    output          video_vs,       //HDMI?1?7?1?7?1?7?0?2?1?7      
-    output  [10:0]  h_disp,         //HDMI?1?7?1?7?0?8?0?9?1?7?0?1?1?7?1?7?1?7
-    output  [10:0]  v_disp,         //HDMI?1?7?1?7?1?7?1?7?0?1?1?7?0?1?1?7?1?7?1?7 
-    output  [10:0]  pixel_xpos,     //?1?7?1?7?1?7?1?3?1?7?1?7?1?7?1?7?1?7?1?7
-    output  [10:0]  pixel_ypos,     //?1?7?1?7?1?7?1?3?1?7?1?7?1?7?1?7?1?7?1?7?1?7      
-    input   [15:0]  data_in,        //?1?7?1?7?1?7?1?7?1?7?1?7?1?7?1?7
-    output          data_req        //?1?7?1?7?1?7?1?7?1?7?1?7?1?7?1?7?1?7?1?7?1?7?1?7   
+    output          video_vs,
+    output [10:0]   h_disp,
+    output [10:0]   v_disp,
+    output [10:0]   pixel_xpos,
+    output [10:0]   pixel_ypos,
+    input  [15:0]   data_in,
+    output          data_req
 );
 
-//wire define
-wire          clk_locked;
-wire          video_hs;
-wire          video_de;
-wire  [23:0]  video_rgb;
-wire  [23:0]  video_rgb_565;
-//reg [23:0] reg_rgb_888;
+wire video_hs;
+wire video_de;
+wire [15:0] video_rgb565_unused;
+wire [7:0] red8   = {data_in[15:11], data_in[15:13]};
+wire [7:0] green8 = {data_in[10:5],  data_in[10:9]};
+wire [7:0] blue8  = {data_in[4:0],   data_in[4:2]};
 
-//assign video_rgb = reg_rgb_888;
-reg   [15:0]  grey_r;
-reg   [15:0]  grey_g;  
-reg   [15:0]  grey_b;
-reg   [15:0]  grey_0;
-reg   [7:0]  grey;
+reg [15:0] red_weighted;
+reg [15:0] green_weighted;
+reg [15:0] blue_weighted;
+reg [16:0] luma_sum;
+reg  [7:0] grey;
 
-assign video_vs1 = video_vs;
+assign hpdout = hpdin;
 
-//*****************************************************
-//**                    main code
-//*****************************************************
-
-////?1?7?1?7?1?7?1?7?1?7?1?7?0?516bit?1?7?1?7?1?7?1?7?0?8?1?7?1?7?0?224bit?1?7?1?7hdmi?1?7?1?7?1?7?1?7
-//always@(posedge pixel_clk or negedge sys_rst_n)begin
-//    if(!sys_rst_n)begin
-//          reg_rgb_888<=0;
-//    end
-//    else begin
-//        reg_rgb_888 = {data_in[15:11], 3'b000, data_in[10:5], 2'b00, data_in[4:0], 3'b000};
-//    end    
-//end
-
-//?1?7?1?7?1?7?1?7?1?7?1?7?0?516bit?1?7?1?7?1?7?1?7?0?8?1?7?1?7?0?224bit?1?7?1?7hdmi?1?7?1?7?1?7?1?3?1?7?1?7?1?7?1?7?0?0?1?7
-always@(posedge pixel_clk or negedge sys_rst_n)begin
-    if(!sys_rst_n)begin
-          grey_r<=0;
-          grey_g<=0;
-          grey_b<=0;
+// RGB565 is first expanded to full-range RGB888.  The 77/150/29
+// coefficients implement round(256 * {0.299, 0.587, 0.114}).
+// The four-clock request lead in video_driver covers FIFO output plus this
+// three-stage arithmetic pipeline.
+always @(posedge pixel_clk or negedge sys_rst_n) begin
+    if(!sys_rst_n) begin
+        red_weighted   <= 16'd0;
+        green_weighted <= 16'd0;
+        blue_weighted  <= 16'd0;
+        luma_sum       <= 17'd0;
+        grey           <= 8'd0;
+    end else begin
+        red_weighted   <= 8'd77  * red8;
+        green_weighted <= 8'd150 * green8;
+        blue_weighted  <= 8'd29  * blue8;
+        luma_sum       <= red_weighted + green_weighted + blue_weighted;
+        grey           <= luma_sum[15:8];
     end
-    else begin
-        grey_r<=77*data_in[15:11]; //77
-        grey_g<=150*data_in[10:5];  //150
-        grey_b<=29*data_in[4:0];   //29
-    end    
 end
 
-always@(posedge pixel_clk or negedge sys_rst_n)begin
-    if(!sys_rst_n)begin
-          grey_0<=0;
-    end
-    else begin
-          grey_0<=grey_r+grey_g+grey_b;
-    end    
-end
+video_driver u_video_driver (
+    .pixel_clk  (pixel_clk),
+    .sys_rst_n  (sys_rst_n),
+    .video_hs   (video_hs),
+    .video_vs   (video_vs),
+    .video_de   (video_de),
+    .video_rgb  (video_rgb565_unused),
+    .data_req   (data_req),
+    .h_disp     (h_disp),
+    .v_disp     (v_disp),
+    .pixel_xpos (pixel_xpos),
+    .pixel_ypos (pixel_ypos),
+    .pixel_data (data_in)
+);
 
-always@(posedge pixel_clk or negedge sys_rst_n)begin
-    if(!sys_rst_n)begin
-          grey<=0;
-    end
-    else begin
-          grey<=grey_0[15:8];
-    end    
-end
+dvi_transmitter_top u_rgb2dvi_0 (
+    .pclk        (pixel_clk),
+    .pclk_x5     (pixel_clk_5x),
+    .reset_n     (sys_rst_n),
+    .video_din   ({grey, grey, grey}),
+    .video_hsync (video_hs),
+    .video_vsync (video_vs),
+    .video_de    (video_de),
+    .tmds_clk_p  (tmds_clk_p),
+    .tmds_clk_n  (tmds_clk_n),
+    .tmds_data_p (tmds_data_p),
+    .tmds_data_n (tmds_data_n),
+    .tmds_oen    (tmds_oen)
+);
 
-assign video_rgb = {grey,grey,grey};  
-
-//?1?7?1?7?1?7?1?7?1?7?1?7?0?1?1?7?1?7?0?5?1?7?1?7?1?7?1?7?0?0?1?7?1?7
-video_driver u_video_driver(
-    .pixel_clk      (pixel_clk),
-    .sys_rst_n      (sys_rst_n),
-
-    .video_hs       (video_hs),
-    .video_vs       (video_vs),
-    .video_de       (video_de),
-    .video_rgb      (video_rgb_565),
-   
-    .data_req       (data_req),
-    .h_disp         (h_disp),
-    .v_disp         (v_disp), 
-    .pixel_xpos     (pixel_xpos),
-    .pixel_ypos     (pixel_ypos),
-    .pixel_data     (data_in)
-    );
-       
-//?1?7?1?7?1?7?1?7HDMI?1?7?1?7?1?7?1?7?0?0?1?7?1?7
-dvi_transmitter_top u_rgb2dvi_0(
-    .pclk           (pixel_clk),
-    .pclk_x5        (pixel_clk_5x),
-    .reset_n        (sys_rst_n),
-                
-    .video_din      (video_rgb),
-    .video_hsync    (video_hs), 
-    .video_vsync    (video_vs),
-    .video_de       (video_de),
-                
-    .tmds_clk_p     (tmds_clk_p),
-    .tmds_clk_n     (tmds_clk_n),
-    .tmds_data_p    (tmds_data_p),
-    .tmds_data_n    (tmds_data_n), 
-    .tmds_oen       (tmds_oen)
-    );
-
-endmodule 
+endmodule

@@ -17,6 +17,8 @@
 *.ip_user_files/
 *.runs/
 *.sim/
+*.rpt
+**/xsim.dir/
 
 # OS/editor files
 .DS_Store
