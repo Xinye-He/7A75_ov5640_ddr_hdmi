@@ -24,7 +24,7 @@ module ddr3_rw(
     input           ddr3_read_valid,
     input           ddr3_pingpang_en,
     output          rfifo_wren,
-    output          rfifo_flush,
+    output reg      rfifo_flush,
     output          capture_allow,
     output  [27:0]  app_addr,
     output          app_en,
@@ -73,7 +73,6 @@ wire read_space_available = projected_read_fill <=
                             (11'd512 - {3'b0, rd_bust_len});
 
 assign capture_allow = capture_allow_reg;
-assign rfifo_flush   = (flush_count != 0);
 assign rfifo_wren    = app_rd_data_valid && !rfifo_full &&
                        !rfifo_wr_busy && !rfifo_flush;
 assign app_en        = write_accept || (state == ST_READ);
@@ -121,8 +120,12 @@ always @(posedge ui_clk) begin
         capture_allow_reg <= 1'b0;
         flush_pending     <= 1'b0;
         flush_count       <= 5'd0;
+        rfifo_flush       <= 1'b0;
         read_overflow     <= 1'b0;
     end else begin
+        // Register the FIFO reset request before it enters the asynchronous
+        // reset synchronizers inside the dual-clock FIFO.
+        rfifo_flush <= (flush_count != 0);
         case({read_accept, app_rd_data_valid})
             2'b10: outstanding_reads <= outstanding_reads + 1'b1;
             2'b01: if(outstanding_reads != 0)

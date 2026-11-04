@@ -45,10 +45,9 @@ wire locked;
 wire base_reset_n = sys_rst_n & locked;
 wire cfg_reset;
 wire cam_reset;
-wire pixel_reset;
 wire cfg_rst_n = ~cfg_reset;
 wire cam_domain_rst_n = ~cam_reset;
-wire pixel_rst_n = ~pixel_reset;
+reg pixel_rst_n;
 
 wire cam_init_done;
 wire cam_init_error;
@@ -60,6 +59,7 @@ wire [15:0] wr_data;
 wire [15:0] rd_data;
 wire rdata_req;
 wire rd_vsync;
+reg rd_vsync_pixel;
 wire [10:0] h_disp;
 
 (* ASYNC_REG = "TRUE", SHREG_EXTRACT = "NO" *) reg capture_allow_meta;
@@ -68,6 +68,12 @@ wire [10:0] h_disp;
 (* ASYNC_REG = "TRUE", SHREG_EXTRACT = "NO" *) reg ddr_ready_cam;
 (* ASYNC_REG = "TRUE", SHREG_EXTRACT = "NO" *) reg cam_init_meta;
 (* ASYNC_REG = "TRUE", SHREG_EXTRACT = "NO" *) reg cam_init_cam;
+reg cam_init_ok_cfg;
+reg cmos_frame_vsync_cam;
+(* ASYNC_REG = "TRUE", SHREG_EXTRACT = "NO" *) reg calib_meta_pixel;
+(* ASYNC_REG = "TRUE", SHREG_EXTRACT = "NO" *) reg calib_sync_pixel;
+(* ASYNC_REG = "TRUE", SHREG_EXTRACT = "NO" *) reg init_meta_pixel;
+(* ASYNC_REG = "TRUE", SHREG_EXTRACT = "NO" *) reg init_sync_pixel;
 
 asyn_rst_syn u_cfg_reset_sync (
     .clk      (clk_50m),
@@ -81,11 +87,26 @@ asyn_rst_syn u_cam_reset_sync (
     .syn_reset(cam_reset)
 );
 
-asyn_rst_syn u_pixel_reset_sync (
-    .clk      (pixel_clk),
-    .reset_n  (base_reset_n & init_calib_complete & cam_init_done & ~cam_init_error),
-    .syn_reset(pixel_reset)
-);
+// Synchronize readiness into the pixel domain before releasing HDMI logic.
+// pixel_rst_n is itself registered, so no combinational CDC signal drives a
+// reset input.
+always @(posedge pixel_clk or negedge base_reset_n) begin
+    if(!base_reset_n) begin
+        calib_meta_pixel <= 1'b0;
+        calib_sync_pixel <= 1'b0;
+        init_meta_pixel  <= 1'b0;
+        init_sync_pixel  <= 1'b0;
+        pixel_rst_n      <= 1'b0;
+        rd_vsync_pixel   <= 1'b0;
+    end else begin
+        calib_meta_pixel <= init_calib_complete;
+        calib_sync_pixel <= calib_meta_pixel;
+        init_meta_pixel  <= cam_init_ok_cfg;
+        init_sync_pixel  <= init_meta_pixel;
+        pixel_rst_n      <= calib_sync_pixel & init_sync_pixel;
+        rd_vsync_pixel   <= rd_vsync;
+    end
+end
 
 always @(posedge cam_pclk or negedge cam_domain_rst_n) begin
     if(!cam_domain_rst_n) begin
@@ -95,14 +116,25 @@ always @(posedge cam_pclk or negedge cam_domain_rst_n) begin
         ddr_ready_cam      <= 1'b0;
         cam_init_meta      <= 1'b0;
         cam_init_cam       <= 1'b0;
+        cmos_frame_vsync_cam <= 1'b0;
     end else begin
         capture_allow_meta <= capture_allow_ui;
         capture_allow_cam  <= capture_allow_meta;
         ddr_ready_meta     <= init_calib_complete;
         ddr_ready_cam      <= ddr_ready_meta;
-        cam_init_meta      <= cam_init_done & ~cam_init_error;
+        cam_init_meta      <= cam_init_ok_cfg;
         cam_init_cam       <= cam_init_meta;
+        cmos_frame_vsync_cam <= cmos_frame_vsync;
     end
+end
+
+// Register the combined status in its source domain before synchronizing it.
+// This prevents glitches from feeding the first CDC synchronizer stage.
+always @(posedge clk_50m or negedge cfg_rst_n) begin
+    if(!cfg_rst_n)
+        cam_init_ok_cfg <= 1'b0;
+    else
+        cam_init_ok_cfg <= cam_init_done & ~cam_init_error;
 end
 
 ov5640_dri u_ov5640_dri (
@@ -159,11 +191,11 @@ ddr3_top u_ddr3_top (
     .ddr3_read_valid     (1'b1),
     .ddr3_pingpang_en    (1'b1),
     .wr_clk              (cam_pclk),
-    .wr_load             (cmos_frame_vsync),
+    .wr_load             (cmos_frame_vsync_cam),
     .datain_valid        (cmos_frame_valid),
     .datain              (wr_data),
     .rd_clk              (pixel_clk),
-    .rd_load             (rd_vsync),
+    .rd_load             (rd_vsync_pixel),
     .dataout             (rd_data),
     .rdata_req           (rdata_req)
 );

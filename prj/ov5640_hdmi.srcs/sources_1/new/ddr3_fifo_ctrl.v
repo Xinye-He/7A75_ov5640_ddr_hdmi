@@ -36,6 +36,7 @@ reg         wr_load_d;
 reg   [2:0] pixel_index;
 reg  [15:0] pic_data_reg;
 reg         rd_load_d;
+reg         rfifo_rst_ui;
 
 wire [127:0] rfifo_dout;
 wire         rfifo_empty;
@@ -43,6 +44,17 @@ wire         wfifo_full;
 wire         wfifo_wr_busy;
 wire         rfifo_rd_busy;
 wire         rfifo_rden;
+
+// Present a registered, glitch-free reset request to the asynchronous FIFO.
+// Assertion from the system reset is asynchronous; release and frame-flush
+// transitions are aligned to the MIG UI clock before the FIFO synchronizes
+// them into its read and write clock domains.
+always @(posedge ui_clk or negedge rst_n) begin
+    if(!rst_n)
+        rfifo_rst_ui <= 1'b1;
+    else
+        rfifo_rst_ui <= rfifo_flush;
+end
 
 assign pic_data   = pic_data_reg;
 assign rfifo_rden = rdata_req && !rfifo_empty && !rfifo_rd_busy &&
@@ -118,7 +130,7 @@ always @(posedge rd_clk or negedge rst_n) begin
 end
 
 rd_fifo u_rd_fifo (
-    .rst           (~rst_n | rfifo_flush),
+    .rst           (rfifo_rst_ui),
     .wr_clk        (ui_clk),
     .rd_clk        (rd_clk),
     .din           (rfifo_din),

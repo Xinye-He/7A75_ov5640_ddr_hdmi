@@ -8,6 +8,7 @@
 *.wdb
 *.wcfg
 *.dcp
+*.edn
 *.bit
 *.bin
 *.ltx
@@ -19,6 +20,7 @@
 *.sim/
 *.rpt
 **/xsim.dir/
+/verification/*_stub.v
 
 # OS/editor files
 .DS_Store
